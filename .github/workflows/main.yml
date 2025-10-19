@@ -35,25 +35,6 @@ jobs:
             docker tag vikicr7/devimage:latest vikicr7/devimage:${{ github.run_number }}
           fi
 
-      # ---- Install Trivy ----
-      - name: Install Trivy
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-          echo deb https://aquasecurity.github.io/trivy-repo/deb stable main | sudo tee /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update -y
-          sudo apt-get install -y trivy
-
-      # ---- Trivy Scan Local Image ----
-      - name: Trivy Scan Local Image
-        run: |
-          if [ "${{ steps.vars.outputs.branch }}" = "master" ]; then
-            trivy image --exit-code 0 --severity HIGH,CRITICAL vikicr7/masterimage:latest
-          else
-            trivy image --exit-code 0 --severity HIGH,CRITICAL vikicr7/devimage:latest
-          fi
-
       # ---- Docker Login ----
       - name: Docker Login
         run: echo "${DOCKER_PASS}" | docker login -u "${DOCKER_USER}" --password-stdin
