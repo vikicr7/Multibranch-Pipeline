@@ -1,0 +1,86 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: 
+      - master
+      - developer
+
+env:
+  DOCKER_USER: ${{ secrets.DOCKER_USER }}
+  DOCKER_PASS: ${{ secrets.DOCKER_PASS }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set Branch Name
+        id: vars
+        run: echo "branch=${GITHUB_REF##*/}" >> $GITHUB_OUTPUT
+
+      # ---- Docker Build ----
+      - name: Build Docker Image
+        run: |
+          if [ "${{ steps.vars.outputs.branch }}" = "master" ]; then
+            docker build -t vikicr7/masterimage .
+            docker tag vikicr7/masterimage:latest vikicr7/masterimage:${{ github.run_number }}
+          elif [ "${{ steps.vars.outputs.branch }}" = "developer" ]; then
+            docker build -t vikicr7/devimage .
+            docker tag vikicr7/devimage:latest vikicr7/devimage:${{ github.run_number }}
+          fi
+
+      # ---- Trivy Scan ----
+      - name: Trivy Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: |
+            ${{ steps.vars.outputs.branch == 'master' && 'vikicr7/masterimage:latest' || 'vikicr7/devimage:latest' }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+
+      # ---- Docker Login ----
+      - name: Docker Login
+        run: echo "${DOCKER_PASS}" | docker login -u "${DOCKER_USER}" --password-stdin
+
+      # ---- Push Docker Image ----
+      - name: Push Docker Image
+        run: |
+          if [ "${{ steps.vars.outputs.branch }}" = "master" ]; then
+            docker push vikicr7/masterimage:latest
+            docker push vikicr7/masterimage:${{ github.run_number }}
+          elif [ "${{ steps.vars.outputs.branch }}" = "developer" ]; then
+            docker push vikicr7/devimage:latest
+            docker push vikicr7/devimage:${{ github.run_number }}
+          fi
+
+      # ---- Deploy Container (optional, if runner has Docker) ----
+      - name: Deploy on Docker
+        run: |
+          if [ "${{ steps.vars.outputs.branch }}" = "master" ]; then
+            docker rm -f masterapp || true
+            docker run -d --name masterapp -p 8010:80 vikicr7/masterimage:latest
+          elif [ "${{ steps.vars.outputs.branch }}" = "developer" ]; then
+            docker rm -f devapp || true
+            docker run -d --name devapp -p 8020:80 vikicr7/devimage:latest
+          fi
+
+      # ---- Cleanup Old Images ----
+      - name: Cleanup Old Docker Images
+        run: |
+          if [ "${{ steps.vars.outputs.branch }}" = "master" ]; then
+            docker images "vikicr7/masterimage" --format "{{.Repository}}:{{.Tag}}" \
+              | grep -v "latest" \
+              | grep -v "${{ github.run_number }}" \
+              | xargs -r docker rmi -f
+          else
+            docker images "vikicr7/devimage" --format "{{.Repository}}:{{.Tag}}" \
+              | grep -v "latest" \
+              | grep -v "${{ github.run_number }}" \
+              | xargs -r docker rmi -f
+          fi
+
+          docker image prune -f
