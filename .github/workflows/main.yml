@@ -15,32 +15,44 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Codes
+      # ---- Checkout ----
+      - name: Checkout Code
         uses: actions/checkout@v4
 
+      # ---- Set Branch Name ----
       - name: Set Branch Name
         id: vars
         run: echo "branch=${GITHUB_REF##*/}" >> $GITHUB_OUTPUT
 
-      # ---- Docker Build ----
+      # ---- Build Docker Image ----
       - name: Build Docker Image
         run: |
           if [ "${{ steps.vars.outputs.branch }}" = "master" ]; then
-            docker build -t vikicr7/masterimage .
+            docker build -t vikicr7/masterimage:latest .
             docker tag vikicr7/masterimage:latest vikicr7/masterimage:${{ github.run_number }}
           elif [ "${{ steps.vars.outputs.branch }}" = "developer" ]; then
-            docker build -t vikicr7/devimage .
+            docker build -t vikicr7/devimage:latest .
             docker tag vikicr7/devimage:latest vikicr7/devimage:${{ github.run_number }}
           fi
 
-      # ---- Trivy Scan ----
-      - name: Trivy Scan
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: |
-            ${{ steps.vars.outputs.branch == 'master' && 'vikicr7/masterimage:latest' || 'vikicr7/devimage:latest' }}
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
+      # ---- Install Trivy ----
+      - name: Install Trivy
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+          echo deb https://aquasecurity.github.io/trivy-repo/deb stable main | sudo tee /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update -y
+          sudo apt-get install -y trivy
+
+      # ---- Trivy Scan Local Image ----
+      - name: Trivy Scan Local Image
+        run: |
+          if [ "${{ steps.vars.outputs.branch }}" = "master" ]; then
+            trivy image --exit-code 0 --severity HIGH,CRITICAL vikicr7/masterimage:latest
+          else
+            trivy image --exit-code 0 --severity HIGH,CRITICAL vikicr7/devimage:latest
+          fi
 
       # ---- Docker Login ----
       - name: Docker Login
@@ -57,7 +69,7 @@ jobs:
             docker push vikicr7/devimage:${{ github.run_number }}
           fi
 
-      # ---- Deploy Container (optional, if runner has Docker) ----
+      # ---- Deploy Container (Optional) ----
       - name: Deploy on Docker
         run: |
           if [ "${{ steps.vars.outputs.branch }}" = "master" ]; then
@@ -68,7 +80,7 @@ jobs:
             docker run -d --name devapp -p 8020:80 vikicr7/devimage:latest
           fi
 
-      # ---- Cleanup Old Images ----
+      # ---- Cleanup Old Docker Images ----
       - name: Cleanup Old Docker Images
         run: |
           if [ "${{ steps.vars.outputs.branch }}" = "master" ]; then
